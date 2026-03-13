@@ -27,23 +27,28 @@ class SyncController extends Controller
             'groups.*.member_count'   => 'nullable|integer|min:0',
         ]);
 
-        $groups = $request->input('groups', []);
+        try {
+            $groups = $request->input('groups', []);
 
-        foreach ($groups as $g) {
-            Group::updateOrCreate(
-                ['whatsapp_group_id' => $g['whatsapp_group_id']],
-                [
-                    'name'         => $g['name'],
-                    'language'     => $g['language'] ?? 'fr',
-                    'country'      => $g['country'] ?? null,
-                    'continent'    => $g['continent'] ?? null,
-                    'member_count' => $g['member_count'] ?? 0,
-                    'is_active'    => true,
-                ]
-            );
+            foreach ($groups as $g) {
+                Group::updateOrCreate(
+                    ['whatsapp_group_id' => $g['whatsapp_group_id']],
+                    [
+                        'name'         => $g['name'],
+                        'language'     => $g['language'] ?? 'fr',
+                        'country'      => $g['country'] ?? null,
+                        'continent'    => $g['continent'] ?? null,
+                        'member_count' => $g['member_count'] ?? 0,
+                        'is_active'    => true,
+                    ]
+                );
+            }
+
+            return response()->json(['synced' => count($groups)]);
+        } catch (\Throwable $e) {
+            Log::error('Sync groups failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['error' => 'Sync failed: ' . $e->getMessage()], 500);
         }
-
-        return response()->json(['synced' => count($groups)]);
     }
 
     /**
@@ -144,52 +149,59 @@ class SyncController extends Controller
         $continent = $request->input('continent');
         $groupName = $request->input('group_name', '');
 
-        $group = Group::where('whatsapp_group_id', $groupId)->first();
+        try {
+            return DB::transaction(function () use ($phone, $groupId, $action, $language, $country, $continent, $groupName) {
+                $group = Group::where('whatsapp_group_id', $groupId)->first();
 
-        // Créer le groupe à la volée s'il n'existe pas encore
-        if (!$group) {
-            $group = Group::create([
-                'whatsapp_group_id' => $groupId,
-                'name'              => $groupName ?: $groupId,
-                'language'          => $language,
-                'country'           => $country,
-                'continent'         => $continent,
-                'member_count'      => 0,
-            ]);
-            Log::info('Group created on-the-fly during event', ['group_id' => $groupId]);
+                // Créer le groupe à la volée s'il n'existe pas encore
+                if (!$group) {
+                    $group = Group::create([
+                        'whatsapp_group_id' => $groupId,
+                        'name'              => $groupName ?: $groupId,
+                        'language'          => $language,
+                        'country'           => $country,
+                        'continent'         => $continent,
+                        'member_count'      => 0,
+                    ]);
+                    Log::info('Group created on-the-fly during event', ['group_id' => $groupId]);
+                }
+
+                $member = Member::firstOrCreate(
+                    ['phone_number' => $phone],
+                    [
+                        'primary_language'  => $language,
+                        'primary_country'   => $country,
+                        'primary_continent' => $continent,
+                        'first_seen_at'     => now(),
+                    ]
+                );
+
+                if ($action === 'add') {
+                    $member->groups()->syncWithoutDetaching([
+                        $group->id => ['joined_at' => now()]
+                    ]);
+                    $member->groups()->updateExistingPivot($group->id, ['left_at' => null]);
+                    $group->increment('member_count');
+
+                    if ($member->wasRecentlyCreated || !$member->whatsapp_message) {
+                        GenerateMemberMessage::dispatch($member);
+                    }
+                }
+
+                if ($action === 'remove') {
+                    DB::table('member_groups')
+                        ->where('member_id', $member->id)
+                        ->where('group_id', $group->id)
+                        ->update(['left_at' => now()]);
+                    $group->decrement('member_count');
+                }
+
+                return response()->json(['ok' => true, 'action' => $action, 'phone' => $phone]);
+            });
+        } catch (\Throwable $e) {
+            Log::error('Member event failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['error' => 'Sync failed: ' . $e->getMessage()], 500);
         }
-
-        $member = Member::firstOrCreate(
-            ['phone_number' => $phone],
-            [
-                'primary_language'  => $language,
-                'primary_country'   => $country,
-                'primary_continent' => $continent,
-                'first_seen_at'     => now(),
-            ]
-        );
-
-        if ($action === 'add') {
-            $member->groups()->syncWithoutDetaching([
-                $group->id => ['joined_at' => now()]
-            ]);
-            $member->groups()->updateExistingPivot($group->id, ['left_at' => null]);
-            $group->increment('member_count');
-
-            if ($member->wasRecentlyCreated || !$member->whatsapp_message) {
-                GenerateMemberMessage::dispatch($member);
-            }
-        }
-
-        if ($action === 'remove') {
-            DB::table('member_groups')
-                ->where('member_id', $member->id)
-                ->where('group_id', $group->id)
-                ->update(['left_at' => now()]);
-            $group->decrement('member_count');
-        }
-
-        return response()->json(['ok' => true, 'action' => $action, 'phone' => $phone]);
     }
 
     /**
@@ -198,11 +210,16 @@ class SyncController extends Controller
      */
     public function health(Request $request): JsonResponse
     {
-        Cache::put('baileys_health', [
-            'connected' => $request->boolean('connected'),
-            'last_ping' => $request->input('last_ping', now()->toISOString()),
-        ], 120);
+        try {
+            Cache::put('baileys_health', [
+                'connected' => $request->boolean('connected'),
+                'last_ping' => $request->input('last_ping', now()->toISOString()),
+            ], 120);
 
-        return response()->json(['ok' => true]);
+            return response()->json(['ok' => true]);
+        } catch (\Throwable $e) {
+            Log::error('Health ping failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['error' => 'Sync failed: ' . $e->getMessage()], 500);
+        }
     }
 }

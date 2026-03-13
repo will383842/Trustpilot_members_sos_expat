@@ -17,6 +17,8 @@ const PHONE_NUMBER = process.env.WA_PHONE_NUMBER; // ex: 33743331201
 
 let sock = null;
 let onGroupEventCallback = null;
+let retryCount = 0;
+const MAX_RETRY_DELAY = 60000; // 60s max
 
 export function setGroupEventHandler(callback) {
   onGroupEventCallback = callback;
@@ -74,8 +76,10 @@ export async function connectToWhatsApp() {
       logger.warn({ statusCode }, 'Connexion fermée');
 
       if (shouldReconnect) {
-        logger.info('Reconnexion dans 5 secondes...');
-        setTimeout(connectToWhatsApp, 5000);
+        retryCount++;
+        const delay = Math.min(MAX_RETRY_DELAY, 5000 * Math.pow(2, retryCount - 1));
+        logger.info({ delay, retryCount }, 'Reconnexion dans %d ms...', delay);
+        setTimeout(connectToWhatsApp, delay);
       } else {
         logger.error(
           'Déconnecté de WhatsApp (logout). Supprime le dossier auth_info/ et redémarre.'
@@ -85,9 +89,13 @@ export async function connectToWhatsApp() {
     }
 
     if (connection === 'open') {
-      logger.info('Connexion WhatsApp établie avec succès ✓');
+      retryCount = 0;
+      logger.info('Connexion WhatsApp établie avec succès');
     }
   });
+
+  // Clean up previous listeners before re-registering (prevents memory leak on reconnection)
+  sock.ev.removeAllListeners('group-participants.update');
 
   sock.ev.on('group-participants.update', async (event) => {
     logger.info({ event }, 'Événement participant de groupe reçu');

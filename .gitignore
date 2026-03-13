@@ -1,2 +1,31 @@
+# Environment
+**/.env
+!**/.env.example
+
+# Dependencies
+**/node_modules/
+**/vendor/
+
+# Build
+**/dist/
+**/build/
+
+# WhatsApp session
+**/auth_info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Laravel
+laravel-api/storage/*.key
+laravel-api/storage/logs/*
+!laravel-api/storage/logs/.gitkeep
+laravel-api/bootstrap/cache/*
+!laravel-api/bootstrap/cache/.gitkeep

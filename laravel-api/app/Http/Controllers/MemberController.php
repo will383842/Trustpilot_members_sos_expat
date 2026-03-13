@@ -101,6 +101,10 @@ class MemberController extends Controller
      */
     public function updateNotes(Request $request, Member $member): JsonResponse
     {
+        $request->validate([
+            'notes' => 'nullable|string|max:5000',
+        ]);
+
         $member->update(['notes' => $request->input('notes', '')]);
         return response()->json(['ok' => true]);
     }

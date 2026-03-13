@@ -6,8 +6,26 @@ import { fetchAllGroups } from './groups.js';
 import { syncGroups, syncMembersBatch, sendGroupEvent, pingHealth } from './sync.js';
 import logger from './logger.js';
 
+// Validate critical env vars at startup
+if (!process.env.LARAVEL_API_KEY || process.env.LARAVEL_API_KEY === 'CHANGE_ME_STRONG_SECRET') {
+  logger.error('LARAVEL_API_KEY is not set or still has default value. Exiting.');
+  process.exit(1);
+}
+
 const RESYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const HEALTH_PING_INTERVAL_MS = 60 * 1000; // 1 minute
+
+function gracefulShutdown(signal) {
+  logger.info({ signal }, 'Received %s, shutting down gracefully...', signal);
+  const sock = getSocket();
+  if (sock) {
+    sock.end(undefined);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function initialSync() {
   try {

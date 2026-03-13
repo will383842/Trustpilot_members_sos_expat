@@ -2,6 +2,18 @@ import { getSocket } from './whatsapp.js';
 import logger from './logger.js';
 
 /**
+ * Fetch groups with a timeout to prevent hanging.
+ */
+async function fetchGroupsWithTimeout(sock, timeoutMs = 30000) {
+  return Promise.race([
+    sock.groupFetchAllParticipating(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Group fetch timed out')), timeoutMs)
+    )
+  ]);
+}
+
+/**
  * Fetch all groups and their participants from WhatsApp.
  * Returns an array of { groupId, name, participants[] } objects.
  */
@@ -10,7 +22,7 @@ export async function fetchAllGroups() {
   if (!sock) throw new Error('WhatsApp socket not initialized');
 
   logger.info('Fetching all joined groups...');
-  const groups = await sock.groupFetchAllParticipating();
+  const groups = await fetchGroupsWithTimeout(sock);
   const groupList = Object.values(groups);
 
   logger.info({ count: groupList.length }, 'Groups fetched');

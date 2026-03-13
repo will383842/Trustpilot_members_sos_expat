@@ -31,10 +31,11 @@ class GptMessageService
             $this->systemPrompts[$language] ?? $this->systemPrompts['fr']
         );
 
-        // Fetch last 10 generated messages to ensure uniqueness
+        // Fetch last 5 generated messages in same language to ensure uniqueness
         $recentMessages = Member::whereNotNull('whatsapp_message')
+            ->where('primary_language', $member->primary_language)
             ->orderByDesc('generated_at')
-            ->limit(10)
+            ->limit(5)
             ->pluck('whatsapp_message')
             ->toArray();
 
