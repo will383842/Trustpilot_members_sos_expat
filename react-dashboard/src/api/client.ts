@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -16,7 +16,7 @@ const api = axios.create({
 let csrfReady = false;
 export async function initCsrf() {
   if (csrfReady) return;
-  await axios.get(`${BASE_URL}/sanctum/csrf-cookie`, { withCredentials: true });
+  await axios.get('/sanctum/csrf-cookie', { withCredentials: true });
   csrfReady = true;
 }
 
@@ -24,7 +24,9 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      window.location.href = '/';
+      if (window.location.pathname !== '/login' && window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
     }
     return Promise.reject(err);
   }
